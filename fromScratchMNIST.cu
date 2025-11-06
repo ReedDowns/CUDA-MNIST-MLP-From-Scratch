@@ -54,6 +54,58 @@ void printMat (float *A, int D1, int D2) {
 #define D 2
 #define BS 1 // Batch Size
 
+/*128x784*/ 
+/*784x1  */ 
+/*128x1  */ 
+    // Set device memory, 
+    // Run matmul 1: Input -> hl1
+    // Activation
+    // Run matmul 2: hl1 -> hl1
+    // Activation
+    // Run matmul 3:  hl2 -> output
+
+void relu() {}
+void softmat() {}
+
+// Overwrite m2 with results from m1 + m2
+__gobal__ void gpu_simple_add_2D (float* m1, float* m2, int *dim1, int *dim2) {
+
+}
+
+// Apply weights to input, 
+// Pre-apply bias
+float layer(
+    cublasHandle_t handle,
+    float* weights1, /*MxN*/ 
+    float* input,  /*Nx1*/ 
+    float* bias,    /*Mx1*/ 
+    float* output,  /*Mx1*/
+    int M, int K, int N,
+    char activation,
+)  {
+    // Preload bias into output
+    
+    
+    // Sgemm
+    float alpha=1.f, beta=1.f;
+    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, input,N, weights1,K,&beta, output,N));
+    
+    /*This layer now stored in output (external)*/
+    
+    // Activation 
+    if (activation == "relu") {relu(output);}
+    if (activation == "softmax") {softmax(output);} 
+    else {
+        fprintf("No activation function in %s:%d\n", __FILE__, __LINE__);
+        exit(EXIT_FAILURE);
+    }
+
+    /* 
+    Output (or whatever was fed to output) is now activated, ready to pass to next layer.
+    Shape should be Mx1 (or batch size; will need to determine later).
+    */
+}
+
 void main() {
     // Hyperparameters?
 
