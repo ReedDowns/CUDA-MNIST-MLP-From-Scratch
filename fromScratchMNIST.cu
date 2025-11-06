@@ -111,6 +111,69 @@ void main() {
 
 
     // Initialize arrays on host (before passing to device).
+    /* Layer 0 - Input*/
+    float* iplHost[I*BS];          // Input layer, 784x1 
+    /* Layer 1 - Hidden 1 */
+    float* weightsOneHost[H*I];     // Weights for layer one 128x784
+    float* biasOneHost[H*BS];          // Bias for layer 128x1
+    float* OPL_OneHost[H*BS];
+    // OPL1: 128xBS
+    /* Layer 2 - Hidden 2 */
+    float* weightsTwoHost[H*H];     // Weights for layer two 128x128
+    float* biasTwoHost[H*BS];          // Bias for layer 2 128x1
+    float* OPL_TwoHost[H*BS];
+    // OPL2: 128xBS
+    /* Layer 3 - Reduction */
+    float* weightsThreeHost[O*H];
+    float* biasThreeHost[O*BS];
+    float* OPL_RedHost[O*BS];
+    // OPL3: 10xBS 
+    /* Layer 4 - Output */
+    float* oplFinalHost[O] = {0.f};  // Output layer; 10x1
+
+    // Initialize host values
+    randInit(weightsOneHost);
+    randInit(biasOneHost);
+    randInit(weightsTwoHost);
+    randInit(biasTwoHost);
+    randInit(weightsThreeHost);
+    randInit(biasTwoHost); 
+
+    // Set up device memory. cudaMalloc allocates device memory
+    float *ipl, *weightsOne, *biasOne, *OPL_One;
+    float *weightsTwo, *biasTwo, *OPL_Two;
+    float *weightsThree, *biasThree, *OPL_Red;
+    float *oplFinal;
+
+    CHECK_CUDA(cudaMalloc(&ipl, I * BS * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&weightsOne, H * I * sizeof(float)));
+    CHECK_CUDA(cudaMallco(&biasOne, H * BS * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&OPL_One, H * BS * sizeof(float)));
+
+    CHECK_CUDA(cudaMalloc(&weightsTwo, H * H * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&biasTwo, H * BS * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&OPL_Two, H * BS * sizeof(float)));
+
+    CHECK_CUDA(cudaMalloc(&weightsThree, O * H * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&biasThree, O * BS * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&OPL_Red, O * BS * sizeof(float)));
+
+    CHECK_CUDA(cudaMalloc(&oplFinal, O * sizeof(float)));
+
+    // Copy intial values over-- all random, except for 
+    CHECK_CUDA(cudaMemcpy(ipl, iplHost, I * BS * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(weightsOne, weightsOneHost, H * I * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(biasOne, biasOneHost, H * BS * sizeof(float), cudaMemcpyHostToDevice));
+
+    CHECK_CUDA(cudaMemcpy(weightsTwo, weightsTwoHost, H * H * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(biasTwo, biasTwoHost, H * BS * sizeof(float), cudaMemcpyHostToDevice));
+
+    CHECK_CUDA(cudaMemcpy(weightsThree, weightsThreeHost, O * H * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(biasThree, biasThreeHost, O * BS * sizeof(float), cudaMemcpyHostToDevice));
+
+    CHECK_CUDA(cudaMemcpy(oplFinal, oplFinalHost, O * sizeof(float), cudaMemcpyHostToDevice));
+
+
 
     // ***Set up foward prop and backward prop***
     cublasHandle_t handle; 
