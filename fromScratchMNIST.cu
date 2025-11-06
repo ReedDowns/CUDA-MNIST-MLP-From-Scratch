@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h> // Still not sure why we include this; perhaps cublas compatability?
@@ -27,6 +28,24 @@ Questions:
         exit(EXIT_FAILURE); \
     } \
 }
+
+// Choppy [0, 1] random number generator to fill + initialize matrices
+void randInit(float* A, size_t n) { 
+    for (size_t i = 0; i < n; i++) {
+        A[i]=(float)rand()/(float)RAND_MAX;
+    }
+}
+
+// Print matrix
+void printMat (float *A, int D1, int D2) {
+    for (int i = 0; i < D1; i++) {
+        for (int j = 0; j < D2; j++) 
+            printf("%8.3f", A[i * D2 + j]);
+        printf("\n");
+        }
+    printf("\n");
+}
+
 
 // Input, Hidden nodes, output, depth,
 #define I 784
