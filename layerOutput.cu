@@ -51,10 +51,19 @@ __global__ void softmax(
     int b       // Dimension two (batch size, ergo columns)
 ) {
     // Assign y to row, x to column. Memory stored along y. Warps along x.
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    int id = row * b + col;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;  // Prev. Block Rows Passsed + This block rows passed
+    int col = blockIdx.x * blockDim.x + threadIdx.x;  // %%
+    int id = row * b + col;                           // Rows passed * cols in a row + col passed in this row
 
+    /* Assigned y to row and x to columns so iteration will be within the same 
+       warp AND along contiguous memory. C++ stores values along rows 
+       (so, by varying columns), and warps progress along threadIdx.x. With this 
+       convention, we vary x along contiguous memory and along the warps. -> False.
+         Iterate along x down columns. So, along warps but not along contiguous memory.
+       2) Will want to assign grid/block/thread dimensions based on input array 
+       dimensions, and with consideration to batching. Each column is one sample.
+       3) Will eventually want to transpose for corrected memory access.*/ 
+       
     /* Each thread will own a result. That thread needs to find its column, sum its column, 
        and replace its value with the exp(val)/sum */
     if (row <  n && col < b) {
@@ -64,13 +73,11 @@ __global__ void softmax(
         
         // Find row max
         for (int i = 0; i < n; i++) if (m2[i * b + col] > colMax) colMax = m2[i * b + col];
- 
         for (int i = 0; i < n; i++) {
-            sumExp += expf(m2[i * b + col] - colMax);
+            sumExp += expf(m2[i * b + col] - colMax); // Stride through mems by row length to hit columns
         }
         m2[id] = expf(m2[id] - colMax) / sumExp;
     }
-
 }
 
 __global__ void add_and_activate(
@@ -83,30 +90,32 @@ __global__ void add_and_activate(
     // Assign y to row, x to column to iterate along warps for softmax
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    int id = row * b + col;
+    int id = row * b + col; 
+
 
     if (row < n && col < b) {
         // 1) Add bias
         m2[id] = m2[id] + m1[id];
 
-        // 2) Activate
-        // relu
-        if (activation == 'r') m2[id] = max(m2[id], 0.f);
-        // softmax
+        // 2) Activate the layer
+        // 2a) relu
+        if (activation == 'r') m2[id] = fmaxf(m2[id], 0.f);
+        // 2b) softmax
         else if (activation == 's') {
             float sumExp=0.f;
             float colMax=0.f;
-            for (int i=0; i<n; i++) colMax = max(m2[i*b+col],colMax);
+            for (int i=0; i<n; i++) colMax = fmaxf(m2[i*b+col],colMax); 
             for (int i=0; i<n; i++) sumExp += expf(m2[i*b+col]-colMax);
             m2[id] = expf(m2[id] - colMax) / sumExp;
         }
-        // Error-- no activation; no action taken yet though
+        // 2c) Error-- no activation; no action taken yet though
         else {
             printf("Activation required in layer func add_and_activate"); // %s:%d. Exiting... \n", __FILE__, __LINE__); 
             // exit(EXIT_FAILURE); // Apparently doesn't work on device code...
         }
     }
-    /* Some Notes: softmax is very non-optimized. */
+    /* Some notes: softmax is very non-optimized; it doesn't stride along contiguous memory. 
+       See __global__ void softmax() in layerOutput.cu for more details on softmax and indexing.*/
 }
 
 void layer (
@@ -151,11 +160,11 @@ int main () {
     printf("Original matrix C:\n");
     printMat(Bi, H, BS);
 
-    // Initialize matrices
     float Out[H * BS] = {0.0f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
     printf("Original matrix A:\n");
     printMat(Out, H, BS);
 
+    // Initialize device memory
     float *dWei;
     CHECK_CUDA(cudaMalloc(&dWei, sizeof(float) * H * BS));
     CHECK_CUDA(cudaMemcpy(dWei, Wei, sizeof(float) * H * BS, cudaMemcpyHostToDevice));
@@ -172,6 +181,7 @@ int main () {
     CHECK_CUDA(cudaMalloc(&dOut, sizeof(float) * H * BS));
     CHECK_CUDA(cudaMemcpy(dOut, Out, sizeof(float) * H * BS, cudaMemcpyHostToDevice));
 
+    // Prepare device settings
     dim3 blockDim(32, 32); 
     dim3 gridDim(1);
     cublasHandle_t handle;
@@ -184,7 +194,7 @@ int main () {
     // Forgot what this doees...
     cudaDeviceSynchronize();
 
-    // Copy result back to host
+    // Copy result back to host, print result
     CHECK_CUDA(cudaMemcpy(Out, dOut, sizeof(float) * H * BS, cudaMemcpyDeviceToHost));
     printf("Result matrix C (from GPU):\n");
     printMat(Out, H, BS);

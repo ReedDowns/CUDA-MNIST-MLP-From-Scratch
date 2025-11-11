@@ -36,11 +36,11 @@ void randInit(float* A, size_t n) {
     }
 }
 
-// Print matrix
-void printMat (float *A, int D1, int D2) {
-    for (int i = 0; i < D1; i++) {
-        for (int j = 0; j < D2; j++) 
-            printf("%8.3f", A[i * D2 + j]);
+// print matrix
+void printmat (float *a, int d1, int d2) {
+    for (int i = 0; i < d1; i++) {
+        for (int j = 0; j < d2; j++) 
+            printf("%8.3f", a[i * d2 + j]);
         printf("\n");
         }
     printf("\n");
@@ -64,46 +64,71 @@ void printMat (float *A, int D1, int D2) {
     // Activation
     // Run matmul 3:  hl2 -> output
 
-void relu() {}
-void softmat() {}
+__global__ void add_and_activate(
+    float* m1,  // Matrix 1, bias
+    float* m2,  // Matrix 2, output
+    int n,      // Number of weights (H, ergo rows)
+    int b,      // Batch size (BS, ergo columns)
+    char activation
+) {
+    // Assign y to row, x to column to iterate along warps for softmax
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int id = row * b + col; 
 
-// Overwrite m2 with results from m1 + m2
-__gobal__ void gpu_simple_add_2D (float* m1, float* m2, int *dim1, int *dim2) {
 
+    if (row < n && col < b) {
+        // 1) Add bias
+        m2[id] = m2[id] + m1[id];
+
+        // 2) Activate the layer
+        // 2a) relu
+        if (activation == 'r') m2[id] = fmaxf(m2[id], 0.f);
+        // 2b) softmax
+        else if (activation == 's') {
+            float sumExp=0.f;
+            float colMax=0.f;
+            for (int i=0; i<n; i++) colMax = fmaxf(m2[i*b+col],colMax); 
+            for (int i=0; i<n; i++) sumExp += expf(m2[i*b+col]-colMax);
+            m2[id] = expf(m2[id] - colMax) / sumExp;
+        }
+        // 2c) Error-- no activation; no action taken yet though
+        else {
+            printf("Activation required in layer func add_and_activate"); // %s:%d. Exiting... \n", __FILE__, __LINE__); 
+            // exit(EXIT_FAILURE); // Apparently doesn't work on device code...
+        }
+    }
+    /* Some notes: softmax is very non-optimized; it doesn't stride along contiguous memory. 
+       See __global__ void softmax() in layerOutput.cu for more details on softmax and indexing.*/
 }
 
-// Apply weights to input, 
-// Pre-apply bias
-float layer(
+// One layer; input -> weights -> bias -> activation.
+// Outputs stored in output
+// Notes are for geneeralized hidden layer
+void layer (
     cublasHandle_t handle,
-    float* weights1, /*MxN*/ 
-    float* input,  /*Nx1*/ 
-    float* bias,    /*Mx1*/ 
-    float* output,  /*Mx1*/
-    int M, int K, int N,
+    float* weights, /* H x I  */
+    float* input,   /* I x BS */
+    float* bias,    /* H x BS */
+    float* output,  /* H x BS */
+    int D1, int D2, int D3,  /* Rows, shared, columns. M x K, K x N. */
     char activation,
-)  {
-    // Preload bias into output
-    
-    
-    // Sgemm
-    float alpha=1.f, beta=1.f;
-    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, input,N, weights1,K,&beta, output,N));
-    
-    /*This layer now stored in output (external)*/
-    
-    // Activation 
-    if (activation == "relu") {relu(output);}
-    if (activation == "softmax") {softmax(output);} 
-    else {
-        fprintf("No activation function in %s:%d\n", __FILE__, __LINE__);
-        exit(EXIT_FAILURE);
-    }
+    dim3 gridDim, dim3 blockDim
+) {
+    // Sgemm; adjust for cuBLAS's column-major storage
+    float alpha = 1.f;
+    float beta  = 0.f;
+    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, D3, D1, D2,
+                             &alpha, input, D3, weights, D2, 
+                             &beta, output, D3));
 
-    /* 
-    Output (or whatever was fed to output) is now activated, ready to pass to next layer.
-    Shape should be Mx1 (or batch size; will need to determine later).
-    */
+    /* This layer now stored in output (external scope)*/
+
+    // Fused bias and activation. Values stored in output.
+    add_and_activate<<<gridDim, blockDim>>>(bias, output, D2, D1, activation);
+    
+    /* Whatever array passed to output is now activated and ready for next layer.
+       Shape is D1 x D3 (H x BS for most layers.)*/
 }
 
 void main() {
@@ -182,8 +207,8 @@ void main() {
 
     // Read in data
 
-    // Apply forward prop and backward prop
-
+    // trainTotal
+    
 
     // Use streams for batch training? 
 
