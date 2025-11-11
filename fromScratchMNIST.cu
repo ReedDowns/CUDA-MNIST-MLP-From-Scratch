@@ -154,7 +154,7 @@ void main() {
     float OPL_RedHost[O*BS];
     // OPL3: 10xBS 
     /* Layer 4 - Output */
-    float oplFinalHost[O] = {0.f};  // Output layer; 10x1
+    float labelsHost[O*BS] = {0.f};  // Output layer; 10x1
 
     // Initialize host values
     randInit(weightsOneHost, H*I);
@@ -168,7 +168,7 @@ void main() {
     float *ipl, *weightsOne, *biasOne, *OPL_One;
     float *weightsTwo, *biasTwo, *OPL_Two;
     float *weightsThree, *biasThree, *OPL_Red;
-    float *oplFinal;
+    float *labels;
 
     CHECK_CUDA(cudaMalloc(&ipl, I * BS * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&weightsOne, H * I * sizeof(float)));
@@ -183,10 +183,9 @@ void main() {
     CHECK_CUDA(cudaMalloc(&biasThree, O * BS * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&OPL_Red, O * BS * sizeof(float)));
 
-    CHECK_CUDA(cudaMalloc(&oplFinal, O * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&labels, O * sizeof(float)));
 
     // Copy intial values over-- all random, except for 
-    CHECK_CUDA(cudaMemcpy(ipl, iplHost, I * BS * sizeof(float), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(weightsOne, weightsOneHost, H * I * sizeof(float), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(biasOne, biasOneHost, H * BS * sizeof(float), cudaMemcpyHostToDevice));
 
@@ -196,7 +195,7 @@ void main() {
     CHECK_CUDA(cudaMemcpy(weightsThree, weightsThreeHost, O * H * sizeof(float), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(biasThree, biasThreeHost, O * BS * sizeof(float), cudaMemcpyHostToDevice));
 
-    CHECK_CUDA(cudaMemcpy(oplFinal, oplFinalHost, O * sizeof(float), cudaMemcpyHostToDevice));
+    // CHECK_CUDA(cudaMemcpy(oplFinal, oplFinalHost, O * sizeof(float), cudaMemcpyHostToDevice));
 
 
 
@@ -205,13 +204,53 @@ void main() {
     CHECK_CUBLAS(cublasCreate(&handle));
 
 
-    // Read in data
+    // Read in data; get train_samples and train_labels
 
-    // trainTotal
-    
+    // int train_samples
+    int tTlength = (int)*sizeof(train_samples) / (int)*sizeof(int) / 784; //
+    int batches  = tTlength / BS;  // 2000 = 60,000 / 30
+    int batchJump = BS * 784; // Num elements to jump = 
 
+
+    /* Looking at the quantity of threads per batch: 23,520 = 30 * 784. 
+    18.375 = 23520/1280. So, in a perferct world, each thread handles 19 elements.
+    Want block sizes to be multiples of 32, want to utilize 10 blocks for maximum device compute power. So, 2352.0 threads per block: 2352 / 32 = 73.5. Closest I'm going to get is 64x64 for now, executing batches one at a time.*/
+    dim3 gridDim1(10);
+    dim3 blockDim1(64, 64);
+
+    /* Now, 256 x 30. 7680 threads, */
+    dim3 gridDim2(10);
+    dim3 blockDim2(64, 16);
+
+    /* Now, 10 x 30  */
+    dim3 gridDim3(10);
+    dim3 blockDim3(32);
+     
+    // For each batch
+    for (int iter = 0; iter < batches; iter++) {
+        
+        // Set iplHost equal to this batch of training data
+        int counter = 0;
+        for (int j = iter*batchJump; j < (iter + 1) * batchJump; j++){
+            iplHost[counter] = train_samples[j];
+        }
+
+        // Copy this training batch to device
+        CHECK_CUDA(cudaMemcpy(ipl, iplHost, I * BS * sizeof(float), cudaMemcpyHostToDevice));
+
+        // IPL -> HL1
+        layer(handle, weightsOne, ipl, biasOne, OPL_One, H, I, BS, 'r', gridDim1, blockDim1);
+        // HL1 -> HL2
+        layer(handle, weightsTwo, OPL_One, H, H, BS, 'r', gridDim2, blockDim2);
+        // HL2 -> Reduction
+        layer(handle, weightsThree, OPL_Two, biasTwo, OPL_Red, 's', gridDim3, blockDim3);
+
+        // Don't actually need an average done here because we're about to start a backpass. Just need labels, of shape O x BS to calculate the gradient (I think). So, oplFinal is obsolete. 
+
+    }
     // Use streams for batch training? 
 
 
     cublasDestroy(&handle);
+    return 0;
 }
