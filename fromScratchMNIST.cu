@@ -131,6 +131,51 @@ void layer (
        Shape is D1 x D3 (H x BS for most layers.)*/
 }
 
+void readFile(const char* filename, float* samples, float* labels) {
+    // Open file
+    FILE *fPtr = fopen(filename, "r");
+    if (fPtr == NULL) { // ptr at null means there's no address ergo no file.
+        perror("Error opening file. Double-check the name.");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set a buffer for each line of the file
+    char line[5120]; // NOT robust if lines are longer than buffer
+    int rows=0;
+    bool headerPresent=true;
+    while (fgets(line, sizeof(line), fPtr)) {
+
+        // Single call to get rid of header
+        if (headerPresent) {
+            char *token = strtok(line, ",\r\n"); // Pointer to mem address of beginning of line?
+            while (token != NULL) {
+                token = strtok(NULL, ",\r\n");
+            }
+            headerPresent=false;
+            continue;
+        }
+
+        // Start token chain
+        char *token = strtok(line, ",\r\n"); // Pointer to mem address of beginning of line?
+
+        // First token per row to label
+        labels[rows] = atof(token);
+        token = strtok(NULL, ",\r\n");
+
+        // Further tokens per row to sample
+        int cols=0;
+        while (token != NULL) {
+            samples[rows*784+cols] = atof(token);
+            token = strtok(NULL, ",\r\n");
+            cols++;
+        }
+        rows++;
+    }
+    fclose(fPtr);
+}
+
+
+
 void main() {
     // Hyperparameters?
 
@@ -205,12 +250,14 @@ void main() {
 
 
     // Read in data; get train_samples and train_labels
+    // Load in data: First row = header, first column = labels
 
     // int train_samples
     int tTlength = (int)*sizeof(train_samples) / (int)*sizeof(int) / 784; //
     int batches  = tTlength / BS;  // 2000 = 60,000 / 30
     int batchJump = BS * 784; // Num elements to jump = 
 
+    /*For batch size, start with 30 !* Not considering how this'll utilize device resources (optimally or not); going with it because it's a simple number that goes into 60k evenly while maintaining a reasonable quantity of passes, 2k.*/
 
     /* Looking at the quantity of threads per batch: 23,520 = 30 * 784. 
     18.375 = 23520/1280. So, in a perferct world, each thread handles 19 elements.
@@ -241,9 +288,9 @@ void main() {
         // IPL -> HL1
         layer(handle, weightsOne, ipl, biasOne, OPL_One, H, I, BS, 'r', gridDim1, blockDim1);
         // HL1 -> HL2
-        layer(handle, weightsTwo, OPL_One, H, H, BS, 'r', gridDim2, blockDim2);
+        layer(handle, weightsTwo, OPL_One, biasTwo, OPL_Two, H, H, BS, 'r', gridDim2, blockDim2);
         // HL2 -> Reduction
-        layer(handle, weightsThree, OPL_Two, biasTwo, OPL_Red, 's', gridDim3, blockDim3);
+        layer(handle, weightsThree, OPL_Two, biasTwo, OPL_Red, O, H, BS, 's', gridDim3, blockDim3);
 
         // Don't actually need an average done here because we're about to start a backpass. Just need labels, of shape O x BS to calculate the gradient (I think). So, oplFinal is obsolete. 
 
