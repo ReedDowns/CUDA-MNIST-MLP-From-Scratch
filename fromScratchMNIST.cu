@@ -66,9 +66,10 @@ void printmat (float *a, int d1, int d2) {
 
 __global__ void add_and_activate(
     float* m1,  // Matrix 1, bias
-    float* m2,  // Matrix 2, output
-    int n,      // Number of weights (H, ergo rows)
-    int b,      // Batch size (BS, ergo columns)
+    float* m2,  // Matrix 2, z, Weights x prevLayer + bias
+    float* m3,  // Matrix 3, output, activated z
+    int n,      // Number of weights (H usually, ergo rows)
+    int b,      // Batch size (BS usually, ergo columns)
     char activation
 ) {
     // Assign y to row, x to column to iterate along warps for softmax
@@ -182,24 +183,27 @@ void main() {
 
     // Initialize arrays on host (before passing to device).
     /* Layer 0 - Input*/
-    float iplHost[I*BS];          // Input layer, 784x1 
+    float iplHost[I*BS];          // Input layer, 784x1  A^L-3
     /* Layer 1 - Hidden 1 */
     float weightsOneHost[H*I];     // Weights for layer one 128x784
     float biasOneHost[H*BS];          // Bias for layer 128x1
-    float OPL_OneHost[H*BS];
+    float z1Host[H*BS];         // save partial step for backprop
+    float OPL_OneHost[H*BS];    // A^L-2
     // OPL1: 128xBS
     /* Layer 2 - Hidden 2 */
     float weightsTwoHost[H*H];     // Weights for layer two 128x128
     float biasTwoHost[H*BS];          // Bias for layer 2 128x1
-    float OPL_TwoHost[H*BS];
+    float z2Host[H*BS];         // save partial step for backprop
+    float OPL_TwoHost[H*BS];       // A^L-1
     // OPL2: 128xBS
     /* Layer 3 - Reduction */
-    float weightsThreeHost[O*H];
-    float biasThreeHost[O*BS];
-    float OPL_RedHost[O*BS];
+    float weightsThreeHost[O*H]; // W^L-1
+    float biasThreeHost[O*BS];   // b^L-1
+    float z3Host[O*BS];          // save partial step for backprop
+    float OPL_RedHost[O*BS];  // A^L
     // OPL3: 10xBS 
     /* Layer 4 - Output */
-    float labelsHost[O*BS] = {0.f};  // Output layer; 10x1
+    float labelsHost[O*BS] = {0.f};  // Output layer; 10x1; y
 
     // Initialize host values
     randInit(weightsOneHost, H*I);
@@ -251,17 +255,24 @@ void main() {
 
     // Read in data; get train_samples and train_labels
     // Load in data: First row = header, first column = labels
+    float *trainSamples = float*
+
 
     // int train_samples
     int tTlength = (int)*sizeof(train_samples) / (int)*sizeof(int) / 784; //
     int batches  = tTlength / BS;  // 2000 = 60,000 / 30
     int batchJump = BS * 784; // Num elements to jump = 
 
-    /*For batch size, start with 30 !* Not considering how this'll utilize device resources (optimally or not); going with it because it's a simple number that goes into 60k evenly while maintaining a reasonable quantity of passes, 2k.*/
+    /*For batch size, start with 30 !* Not considering how this'll 
+    utilize device resources (optimally or not); going with it because 
+    it's a simple number that goes into 60k evenly while maintaining 
+    a reasonable quantity of passes, 2k.*/
 
     /* Looking at the quantity of threads per batch: 23,520 = 30 * 784. 
     18.375 = 23520/1280. So, in a perferct world, each thread handles 19 elements.
-    Want block sizes to be multiples of 32, want to utilize 10 blocks for maximum device compute power. So, 2352.0 threads per block: 2352 / 32 = 73.5. Closest I'm going to get is 64x64 for now, executing batches one at a time.*/
+    Want block sizes to be multiples of 32, want to utilize 10 blocks for maximum 
+    device compute power. So, 2352.0 threads per block: 2352 / 32 = 73.5. Closest 
+    I'm going to get is 64x64 for now, executing batches one at a time.*/
     dim3 gridDim1(10);
     dim3 blockDim1(64, 64);
 
@@ -275,6 +286,8 @@ void main() {
      
     // For each batch
     for (int iter = 0; iter < batches; iter++) {
+
+        //!! Still need to reset matrices between each batch; maybe just move entire intialization block down here...
         
         // Set iplHost equal to this batch of training data
         int counter = 0;
